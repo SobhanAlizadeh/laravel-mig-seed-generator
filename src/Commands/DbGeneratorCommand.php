@@ -10,6 +10,9 @@ class DbGeneratorCommand extends Command
     protected $signature = 'db:generate {--force : Overwrite existing migrations and seeders}';
     protected $description = 'Generate migrations and seeders for all tables in the database';
 
+    // List of tables to skip
+    private $excludedTables = ['failed_jobs', 'jobs', 'personal_access_tokens','migrations'];
+
     public function __construct()
     {
         parent::__construct();
@@ -26,10 +29,45 @@ class DbGeneratorCommand extends Command
 
             foreach ($tableNames as $table) {
                 $tableName = array_values($table)[0];
+
+                // Skip excluded tables
+                if (in_array($tableName, $this->excludedTables)) {
+                    $this->info("Skipping table: $tableName");
+                    continue;
+                }
+
                 $this->info("Processing table: $tableName");
 
-                // Generate Migration
+                // Generate Migration for the table
                 $this->generateMigration($tableName);
+            }
+
+            // After generating table migrations, generate foreign key migrations
+            foreach ($tableNames as $table) {
+                $tableName = array_values($table)[0];
+
+                // Skip excluded tables
+                if (in_array($tableName, $this->excludedTables)) {
+                    continue;
+                }
+
+                // Get foreign keys
+                $foreignKeys = $this->getForeignKeys($tableName);
+
+                // Generate Foreign Key Migration (if any)
+                if (!empty($foreignKeys)) {
+                    $this->generateForeignKeyMigration($tableName, $foreignKeys);
+                }
+            }
+
+            // Generate Seeders for all tables
+            foreach ($tableNames as $table) {
+                $tableName = array_values($table)[0];
+
+                // Skip excluded tables
+                if (in_array($tableName, $this->excludedTables)) {
+                    continue;
+                }
 
                 // Generate Seeder
                 $this->generateSeeder($tableName);
@@ -46,14 +84,17 @@ class DbGeneratorCommand extends Command
         // Get column details using SHOW COLUMNS
         $columns = DB::select("SHOW COLUMNS FROM $tableName");
         $primaryKey = $this->getPrimaryKey($tableName);
-        $foreignKeys = $this->getForeignKeys($tableName);
 
+        // Get foreign keys for this table
+        $foreignKeys = $this->getForeignKeys($tableName);
+        $foreignKeyColumns = array_column($foreignKeys, 'column');
+
+        // Generate migration content with Anonymous Class
         $migrationContent = "<?php\n\n";
         $migrationContent .= "use Illuminate\Database\Migrations\Migration;\n";
         $migrationContent .= "use Illuminate\Database\Schema\Blueprint;\n";
         $migrationContent .= "use Illuminate\Support\Facades\Schema;\n\n";
-
-        $migrationContent .= "class Create{$tableName}Table extends Migration\n";
+        $migrationContent .= "return new class extends Migration\n";
         $migrationContent .= "{\n";
         $migrationContent .= "    public function up()\n";
         $migrationContent .= "    {\n";
@@ -64,22 +105,17 @@ class DbGeneratorCommand extends Command
             $migrationContent .= "            \$table->id('$primaryKey');\n";
         }
 
-        // Add columns
+        // Add columns (excluding foreign key columns)
         foreach ($columns as $column) {
             $columnName = $column->Field;
             $columnType = $this->convertColumnType($column->Type);
 
             // Skip primary key column if already added
-            if ($columnName === $primaryKey) {
+            if ($columnName === $primaryKey || in_array($columnName, $foreignKeyColumns)) {
                 continue;
             }
 
             $migrationContent .= "            \$table->$columnType('$columnName');\n";
-        }
-
-        // Add foreign keys
-        foreach ($foreignKeys as $foreignKey) {
-            $migrationContent .= "            \$table->foreign('{$foreignKey['column']}')->references('{$foreignKey['references']}')->on('{$foreignKey['on_table']}');\n";
         }
 
         $migrationContent .= "        });\n";
@@ -88,30 +124,76 @@ class DbGeneratorCommand extends Command
         $migrationContent .= "    {\n";
         $migrationContent .= "        Schema::dropIfExists('$tableName');\n";
         $migrationContent .= "    }\n";
-        $migrationContent .= "}";
+        $migrationContent .= "};\n";
 
-        $filePath = database_path("migrations/" . date('Y_m_d_His') . "_create_{$tableName}_table.php");
+        $fileName = date('YmdHis') . "_create_{$tableName}_table.php";
+        $filePath = database_path("migrations/{$fileName}");
         if (file_exists($filePath) && !$this->option('force')) {
             $this->warn("Migration for $tableName already exists. Use --force to overwrite.");
             return;
         }
+
         file_put_contents($filePath, $migrationContent);
         $this->info("Migration for $tableName created.");
+    }
+
+    private function generateForeignKeyMigration($tableName, $foreignKeys)
+    {
+        // Generate migration content with Anonymous Class
+        $migrationContent = "<?php\n\n";
+        $migrationContent .= "use Illuminate\Database\Migrations\Migration;\n";
+        $migrationContent .= "use Illuminate\Database\Schema\Blueprint;\n";
+        $migrationContent .= "use Illuminate\Support\Facades\Schema;\n\n";
+        $migrationContent .= "return new class extends Migration\n";
+        $migrationContent .= "{\n";
+        $migrationContent .= "    public function up()\n";
+        $migrationContent .= "    {\n";
+        $migrationContent .= "        Schema::table('$tableName', function (Blueprint \$table) {\n";
+
+        // Add foreign keys using foreignId
+        foreach ($foreignKeys as $foreignKey) {
+            $migrationContent .= "            \$table->foreignId('{$foreignKey['column']}')->nullable();\n";
+        }
+
+        $migrationContent .= "        });\n";
+        $migrationContent .= "    }\n\n";
+        $migrationContent .= "    public function down()\n";
+        $migrationContent .= "    {\n";
+        $migrationContent .= "        Schema::table('$tableName', function (Blueprint \$table) {\n";
+
+        // Drop foreign keys
+        foreach ($foreignKeys as $foreignKey) {
+            $migrationContent .= "            \$table->dropColumn('{$foreignKey['column']}');\n";
+        }
+
+        $migrationContent .= "        });\n";
+        $migrationContent .= "    }\n";
+        $migrationContent .= "};\n";
+
+        $fileName = date('YmdHis', strtotime('+1 second')) . "_add_foreign_keys_to_{$tableName}_table.php";
+        $filePath = database_path("migrations/{$fileName}");
+        if (file_exists($filePath) && !$this->option('force')) {
+            $this->warn("Foreign key migration for $tableName already exists. Use --force to overwrite.");
+            return;
+        }
+
+        file_put_contents($filePath, $migrationContent);
+        $this->info("Foreign key migration for $tableName created.");
     }
 
     private function generateSeeder($tableName)
     {
         $rows = DB::table($tableName)->get();
+
+        // Generate seeder content
         $seederContent = "<?php\n\n";
         $seederContent .= "use Illuminate\Database\Seeder;\n";
         $seederContent .= "use Illuminate\Support\Facades\DB;\n\n";
-
         $seederContent .= "class {$tableName}Seeder extends Seeder\n";
         $seederContent .= "{\n";
         $seederContent .= "    public function run()\n";
         $seederContent .= "    {\n";
         $seederContent .= "        DB::table('$tableName')->truncate();\n";
-
         foreach ($rows as $row) {
             $values = [];
             foreach ($row as $key => $value) {
@@ -119,15 +201,16 @@ class DbGeneratorCommand extends Command
             }
             $seederContent .= "        DB::table('$tableName')->insert([" . implode(', ', $values) . "]);\n";
         }
-
         $seederContent .= "    }\n";
         $seederContent .= "}";
 
-        $filePath = database_path("seeders/{$tableName}Seeder.php");
+        $fileName = "{$tableName}Seeder.php";
+        $filePath = database_path("seeders/{$fileName}");
         if (file_exists($filePath) && !$this->option('force')) {
             $this->warn("Seeder for $tableName already exists. Use --force to overwrite.");
             return;
         }
+
         file_put_contents($filePath, $seederContent);
         $this->info("Seeder for $tableName created.");
     }
