@@ -24,5 +24,7 @@
                 "SobhanDev\\DbGenerator\\Providers\\DbGeneratorServiceProvider"
             ]
         }
-    }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
 }
