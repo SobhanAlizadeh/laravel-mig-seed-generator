@@ -1,9 +1,8 @@
 <?php
 
-namespace YourVendorName\DbGenerator\Providers;
+namespace SobhanDev\DbGenerator\Providers;
 
 use Illuminate\Support\ServiceProvider;
-use SobhanDev\DbGenerator\Commands\GenerateMigrationsAndSeeders;
 
 class DbGeneratorServiceProvider extends ServiceProvider
 {
@@ -11,7 +10,7 @@ class DbGeneratorServiceProvider extends ServiceProvider
     {
         // Register the command
         $this->commands([
-            GenerateMigrationsAndSeeders::class,
+            \SobhanDev\DbGenerator\Commands\GenerateMigrationsAndSeeders::class,
         ]);
     }
 
