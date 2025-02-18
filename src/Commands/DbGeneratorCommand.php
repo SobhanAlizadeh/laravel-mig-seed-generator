@@ -61,6 +61,7 @@ class DbGeneratorCommand extends Command
             }
 
             // Generate Seeders for all tables
+            $seeders = [];
             foreach ($tableNames as $table) {
                 $tableName = array_values($table)[0];
 
@@ -71,7 +72,13 @@ class DbGeneratorCommand extends Command
 
                 // Generate Seeder
                 $this->generateSeeder($tableName);
+
+                // Add seeder class name to the list
+                $seeders[] = "{$tableName}Seeder";
             }
+
+            // Generate or update DatabaseSeeder.php
+            $this->generateDatabaseSeeder($seeders);
 
             $this->info('All migrations and seeders have been generated!');
         } catch (\Exception $e) {
@@ -115,7 +122,11 @@ class DbGeneratorCommand extends Command
                 continue;
             }
 
-            $migrationContent .= "            \$table->$columnType('$columnName');\n";
+            // Check if the column is one of the special columns (id, created_at, updated_at)
+
+                // Make all other columns nullable
+                $migrationContent .= "            \$table->$columnType('$columnName')->nullable();\n";
+
         }
 
         $migrationContent .= "        });\n";
@@ -187,6 +198,7 @@ class DbGeneratorCommand extends Command
 
         // Generate seeder content
         $seederContent = "<?php\n\n";
+        $seederContent .= "namespace Database\Seeders;\n\n";
         $seederContent .= "use Illuminate\Database\Seeder;\n";
         $seederContent .= "use Illuminate\Support\Facades\DB;\n\n";
         $seederContent .= "class {$tableName}Seeder extends Seeder\n";
@@ -197,7 +209,22 @@ class DbGeneratorCommand extends Command
         foreach ($rows as $row) {
             $values = [];
             foreach ($row as $key => $value) {
-                $values[] = "'$key' => '" . addslashes($value) . "'";
+                if ($key === 'deleted_at') {
+                    // Handle 'deleted_at' column specifically
+                    if ($value === '' || is_null($value)) {
+                        $values[] = "'$key' => null";
+                    } else {
+                        // Format datetime values properly
+                        $values[] = "'$key' => '" . addslashes($value) . "'";
+                    }
+                } else {
+                    // Replace empty values with null for other columns
+                    if ($value === '' || is_null($value)) {
+                        $values[] = "'$key' => null";
+                    } else {
+                        $values[] = "'$key' => '" . addslashes($value) . "'";
+                    }
+                }
             }
             $seederContent .= "        DB::table('$tableName')->insert([" . implode(', ', $values) . "]);\n";
         }
@@ -213,6 +240,60 @@ class DbGeneratorCommand extends Command
 
         file_put_contents($filePath, $seederContent);
         $this->info("Seeder for $tableName created.");
+    }
+    private function generateDatabaseSeeder($seeders)
+    {
+        $filePath = database_path('seeders/DatabaseSeeder.php');
+
+        // Check if DatabaseSeeder.php already exists
+        if (file_exists($filePath)) {
+            $content = file_get_contents($filePath);
+
+            // Extract existing seeders from the file
+            preg_match_all('/\$this->call\((.*?)::class\);/', $content, $matches);
+            $existingSeeders = $matches[1] ?? [];
+
+            // Merge existing seeders with new ones
+            $allSeeders = array_unique(array_merge($existingSeeders, $seeders));
+        } else {
+            // Create a new DatabaseSeeder.php file
+            $content = "<?php\n\n";
+            $content .= "namespace Database\Seeders;\n\n";
+            $content .= "use Illuminate\Database\Seeder;\n\n";
+            $content .= "class DatabaseSeeder extends Seeder\n";
+            $content .= "{\n";
+            $content .= "    public function run()\n";
+            $content .= "    {\n";
+            $allSeeders = $seeders;
+        }
+
+        // Generate import statements for seeders
+        $importStatements = [];
+        foreach ($allSeeders as $seeder) {
+            $importStatements[] = "use Database\Seeders\\{$seeder};";
+        }
+
+        // Build the final content
+        $finalContent = "<?php\n\n";
+        $finalContent .= "namespace Database\Seeders;\n\n";
+        $finalContent .= "use Illuminate\Database\Seeder;\n";
+        $finalContent .= implode("\n", $importStatements) . "\n\n";
+        $finalContent .= "class DatabaseSeeder extends Seeder\n";
+        $finalContent .= "{\n";
+        $finalContent .= "    public function run()\n";
+        $finalContent .= "    {\n";
+
+        // Add seeder calls
+        foreach ($allSeeders as $seeder) {
+            $finalContent .= "        \$this->call({$seeder}::class);\n";
+        }
+
+        $finalContent .= "    }\n";
+        $finalContent .= "}";
+
+        // Write the updated content to DatabaseSeeder.php
+        file_put_contents($filePath, $finalContent);
+        $this->info("DatabaseSeeder.php has been updated with all seeders.");
     }
 
     private function convertColumnType($type)
