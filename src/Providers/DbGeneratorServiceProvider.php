@@ -10,7 +10,7 @@ class DbGeneratorServiceProvider extends ServiceProvider
     {
         // Register the command
         $this->commands([
-            \SobhanDev\DbGenerator\Commands\GenerateMigrationsAndSeeders::class,
+            \SobhanDev\DbGenerator\Commands\DbGeneratorCommand::class,
         ]);
     }
 

@@ -5,7 +5,7 @@ namespace App\Console\Commands;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 
-class GenerateMigrationsAndSeeders extends Command
+class DbGeneratorCommand extends Command
 {
     protected $signature = 'db:generate {--force : Overwrite existing migrations and seeders}';
     protected $description = 'Generate migrations and seeders for all tables in the database';
