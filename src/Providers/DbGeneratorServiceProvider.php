@@ -8,7 +8,6 @@ class DbGeneratorServiceProvider extends ServiceProvider
 {
     public function register()
     {
-        // Register the command
         $this->commands([
             \SobhanDev\DbGenerator\Commands\DbGeneratorCommand::class,
         ]);
