@@ -1,5 +1,5 @@
 {
-    "name": "SobhanDev/laravel-mig-seed-generator",
+    "name": "sobhan-dev/laravel-mig-seed-generator",
     "description": "A Laravel package to generate migrations and seeders from an existing database.",
     "type": "library",
     "license": "MIT",
